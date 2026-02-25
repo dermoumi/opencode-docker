@@ -31,6 +31,10 @@ services:
       args:
         UID: ${UID:-1000}
         GID: ${GID:-1000}
+        ENTRYPOINT: |
+          #!/bin/bash
+          # Custom startup logic here
+          exec "$@"
       dockerfile_inline: |
         FROM archlinux:latest
 
@@ -42,21 +46,28 @@ services:
         ENV USER=dev
         ARG UID=1000
         ARG GID=1000
-        RUN groupadd -g $${GID} $${USER} \
-          && useradd -mG wheel -g $${USER} -s /bin/bash -u $${UID} $${USER} \
-          && echo "$${USER} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$${USER}
+        RUN groupadd -g $$GID $$USER \
+          && useradd -mG wheel -g $$USER -s /bin/bash -u $$UID $$USER \
+          && echo "$$USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$$USER
 
         # Set the working directory
         RUN mkdir -p /workspace \
-          && chown $${USER}:$${USER} /workspace
+          && chown $$USER:$$USER /workspace
         WORKDIR /workspace
 
+        # Create entrypoint script
+        ARG ENTRYPOINT
+        RUN echo "$$ENTRYPOINT" > /entrypoint.sh
+        RUN chmod +x /entrypoint.sh
+
+        ENTRYPOINT ["/entrypoint.sh"]
+
         # Switch to the non-root user
-        USER $${USER}
+        USER $$USER
 
         # Install opencode
         RUN curl -fsSL https://opencode.ai/install | bash
-        ENV PATH="/home/$${USER}/.opencode/bin:$${PATH}"
+        ENV PATH="/home/$$USER/.opencode/bin:$$PATH"
 
         # Install yay (AUR helper) as the non-root user
         RUN git clone https://aur.archlinux.org/yay.git \
