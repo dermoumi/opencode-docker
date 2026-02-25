@@ -1,0 +1,105 @@
+#!/bin/bash
+
+set -e
+
+# Default modes
+DEBUG=0
+BUILD=0
+DOWN=0
+
+# Parse flags
+while getopts "bdD" opt; do
+  case $opt in
+    b) BUILD=1;;
+    d) DOWN=1;;
+    D) DEBUG=1;;
+    *) echo "Usage: oc [-b] [-d] [-D]"; exit 1;;
+  esac
+done
+
+# The executable's current directory
+EXEC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Base docker arguments
+DIR_HASH="$(echo -n "$PWD" | md5sum | cut -c1-4)"
+PROJECT_NAME="opencode-$(basename "$PWD")-$DIR_HASH"
+
+DOCKER_COMPOSE="$(cat <<'EOF'
+services:
+  opencode:
+    build:
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+      dockerfile_inline: |
+        FROM archlinux:latest
+
+        # Install minimal dependencies
+        RUN pacman -Syu --noconfirm \
+          base-devel git sudo docker openssh
+
+        # Create a non-root user and make it sudoer without password
+        ENV USER=dev
+        ARG UID=1000
+        ARG GID=1000
+        RUN groupadd -g $${GID} $${USER} \
+          && useradd -mG wheel -g $${USER} -s /bin/bash -u $${UID} $${USER} \
+          && echo "$${USER} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$${USER}
+
+        # Set the working directory
+        RUN mkdir -p /workspace \
+          && chown $${USER}:$${USER} /workspace
+        WORKDIR /workspace
+
+        # Switch to the non-root user
+        USER $${USER}
+
+        # Install opencode
+        RUN curl -fsSL https://opencode.ai/install | bash
+        ENV PATH="/home/$${USER}/.opencode/bin:$${PATH}"
+
+        # Install yay (AUR helper) as the non-root user
+        RUN git clone https://aur.archlinux.org/yay.git \
+          && cd yay \
+          && makepkg -si --noconfirm \
+          && cd .. \
+          && rm -rf yay
+
+        # Initial command to just keep the container running
+        CMD ["bash", "-c", "sleep infinity"]
+    environment:
+      - SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
+    volumes:
+      - ${PWD}:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SSH_AUTH_SOCK:-/dev/null}:${SSH_AUTH_SOCK}
+EOF
+)"
+
+# Utility function to run docker compose with the correct arguments
+compose() {
+  GID=$(id -g) docker compose --project-name "$PROJECT_NAME" "$@"
+}
+
+# Tear down the compose file and exit if requested
+if ((DOWN)); then
+  compose down
+  exit 0
+fi
+
+# Run the compose file
+UP_ARGS=()
+if ((BUILD)); then
+  UP_ARGS+=("--build")
+fi
+compose --file - up "${UP_ARGS[@]}" -d <<< "$DOCKER_COMPOSE"
+
+# Shell into the container if in debug mode
+if ((DEBUG)); then
+  compose exec opencode bash
+  exit 0
+fi
+
+# Run the opencode command in the container
+OPENCODE_ARGS=()
+compose exec opencode opencode "${OPENCODE_ARGS[@]}"
