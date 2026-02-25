@@ -33,8 +33,24 @@ services:
         GID: ${GID:-1000}
         ENTRYPOINT: |
           #!/bin/bash
-          # Custom startup logic here
-          exec "$@"
+
+          # Export the SSH_AUTH_SOCK if it exists
+          if [[ -S /tmp/ssh_auth_sock ]]; then
+            export SSH_AUTH_SOCK=/tmp/ssh_auth_sock
+          fi
+
+          # Symlink the GnuPG socket to the correct directory if it exists
+          if [[ -S /tmp/gnupg_sock ]]; then
+            GNUPG_SOCK=$$(gpgconf --list-dir agent-socket)
+            mkdir -m 700 -p "$$(dirname "$$GNUPG_SOCK")"
+            ln -sf /tmp/gnupg_sock "$$GNUPG_SOCK"
+          fi
+
+          if [[ -f /tmp/host_gitconfig ]]; then
+            ln -sf /tmp/host_gitconfig "$$HOME/.gitconfig"
+          fi
+
+          exec "$$@"
       dockerfile_inline: |
         FROM archlinux:latest
 
@@ -78,12 +94,12 @@ services:
 
         # Initial command to just keep the container running
         CMD ["bash", "-c", "sleep infinity"]
-    environment:
-      - SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
     volumes:
       - ${PWD}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${SSH_AUTH_SOCK:-/dev/null}:${SSH_AUTH_SOCK}
+      - ${SSH_AUTH_SOCK:-/dev/null}:/tmp/ssh_auth_sock
+      - ${GNUPG_SOCK:-/dev/null}:/tmp/gnupg_sock
+      - ${GITCONFIG:-/dev/null}:/tmp/host_gitconfig
 EOF
 )"
 
@@ -107,6 +123,18 @@ if ((DOWN)); then
   exit 0
 fi
 
+# Setup the GPG extra socket.
+# The extra socket is more restricted then the normal socket
+GNUPG_SOCK=$(gpgconf --list-dir agent-extra-socket)
+if [[ -S "$GNUPG_SOCK" ]]; then
+  export GNUPG_SOCK
+fi
+
+# Setup gitconfig if it exists
+if [[ -f "$HOME/.gitconfig" ]]; then
+  export GITCONFIG="$HOME/.gitconfig"
+fi
+
 # Run the compose file
 UP_ARGS=()
 if ((BUILD)); then
@@ -114,9 +142,14 @@ if ((BUILD)); then
 fi
 compose --file - up "${UP_ARGS[@]}" -d <<< "$DOCKER_COMPOSE"
 
+# Import the public GPG keys if the socket is available
+if [[ -S "$GNUPG_SOCK" ]]; then
+  gpg --export -a | docker exec -i "$(get_container_id)" gpg --import >/dev/null 2>&1
+fi
+
 # Shell into the container if in debug mode
 if ((DEBUG)); then
-  docker_exec bash
+  docker_exec /entrypoint.sh bash
   exit 0
 fi
 
