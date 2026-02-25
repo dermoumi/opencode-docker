@@ -8,13 +8,13 @@ BUILD=0
 DOWN=0
 
 # Parse flags
-while getopts "bdDg" opt; do
+while getopts "bdDl" opt; do
   case $opt in
     b) BUILD=1;;
     d) DOWN=1;;
     D) DEBUG=1;;
-    g) GLOBAL=1;;
-    *) echo "Usage: ocode [-b] [-d] [-D] [-g]"; exit 1;;
+    l) LOCAL=1;;
+    *) echo "Usage: ocode [-b] [-d] [-D] [-l]"; exit 1;;
   esac
 done
 
@@ -147,7 +147,7 @@ if [[ -f "$HOME/.gitconfig" ]]; then
 fi
 
 # Run the compose file
-if ((GLOBAL)); then
+if ! ((LOCAL)); then
   mkdir -p "${HOME}/.local/share/opencode"
   mkdir -p "${HOME}/.local/state/opencode"
   mkdir -p "${HOME}/.config/opencode"
