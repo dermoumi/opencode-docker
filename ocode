@@ -8,12 +8,13 @@ BUILD=0
 DOWN=0
 
 # Parse flags
-while getopts "bdD" opt; do
+while getopts "bdDg" opt; do
   case $opt in
     b) BUILD=1;;
     d) DOWN=1;;
     D) DEBUG=1;;
-    *) echo "Usage: oc [-b] [-d] [-D]"; exit 1;;
+    g) GLOBAL=1;;
+    *) echo "Usage: oc [-b] [-d] [-D] [-g]"; exit 1;;
   esac
 done
 
@@ -81,6 +82,11 @@ services:
         # Switch to the non-root user
         USER $$USER
 
+        # Premake some directories for opencode
+        RUN mkdir -p /home/$$USER/.local/share/opencode \
+          && mkdir -p /home/$$USER/.local/state/opencode \
+          && mkdir -p /home/$$USER/.config/opencode
+
         # Install opencode
         RUN curl -fsSL https://opencode.ai/install | bash
         ENV PATH="/home/$$USER/.opencode/bin:$$PATH"
@@ -100,6 +106,14 @@ services:
       - ${SSH_AUTH_SOCK:-/dev/null}:/tmp/ssh_auth_sock
       - ${GNUPG_SOCK:-/dev/null}:/tmp/gnupg_sock
       - ${GITCONFIG:-/dev/null}:/tmp/host_gitconfig
+      - ${OPENCODE_SHARE:-opencode_share}:/home/dev/.local/share/opencode
+      - ${OPENCODE_STATE:-opencode_state}:/home/dev/.local/state/opencode
+      - ${OPENCODE_CONFIG:-opencode_config}:/home/dev/.config/opencode
+
+volumes:
+  opencode_share:
+  opencode_state:
+  opencode_config:
 EOF
 )"
 
@@ -136,6 +150,16 @@ if [[ -f "$HOME/.gitconfig" ]]; then
 fi
 
 # Run the compose file
+if ((GLOBAL)); then
+  mkdir -p "${HOME}/.local/share/opencode"
+  mkdir -p "${HOME}/.local/state/opencode"
+  mkdir -p "${HOME}/.config/opencode"
+
+  export OPENCODE_SHARE="${HOME}/.local/share/opencode"
+  export OPENCODE_STATE="${HOME}/.local/state/opencode"
+  export OPENCODE_CONFIG="${HOME}/.config/opencode"
+fi
+
 UP_ARGS=()
 if ((BUILD)); then
   UP_ARGS+=("--build")
