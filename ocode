@@ -81,6 +81,15 @@ compose() {
   GID=$(id -g) docker compose --project-name "$PROJECT_NAME" "$@"
 }
 
+get_container_id() {
+  docker ps --filter "name=${PROJECT_NAME}-opencode-1" -q
+}
+
+docker_exec() {
+  # Use different detach keys to avoid conflicts with opencode's CTRL+P
+  docker exec -it --detach-keys='ctrl-e,e' "$(get_container_id)" "$@"
+}
+
 # Tear down the compose file and exit if requested
 if ((DOWN)); then
   compose down
@@ -96,10 +105,10 @@ compose --file - up "${UP_ARGS[@]}" -d <<< "$DOCKER_COMPOSE"
 
 # Shell into the container if in debug mode
 if ((DEBUG)); then
-  compose exec opencode bash
+  docker_exec bash
   exit 0
 fi
 
 # Run the opencode command in the container
 OPENCODE_ARGS=()
-compose exec opencode opencode "${OPENCODE_ARGS[@]}"
+docker_exec opencode "${OPENCODE_ARGS[@]}"
