@@ -21,8 +21,21 @@ while getopts "bdDlv" opt; do
 done
 shift $((OPTIND - 1))
 
-# Target directory (first positional arg or current directory)
-TARGET_DIR="$(realpath "${1:-$PWD}")"
+# Split positional args at -- separator
+EXTRA_ARGS=()
+if [[ "${1:-}" == "--" ]]; then
+  # No directory arg, rest goes to opencode
+  shift
+  EXTRA_ARGS=("$@")
+  TARGET_DIR="$PWD"
+else
+  TARGET_DIR="$(realpath -- "${1:-$PWD}")"
+  shift || true
+  if [[ "${1:-}" == "--" ]]; then
+    shift
+  fi
+  EXTRA_ARGS=("$@")
+fi
 export TARGET_DIR
 
 # Base docker arguments
@@ -311,7 +324,9 @@ if ((DEBUG)); then
 fi
 
 # Run the opencode command in the container
-OPENCODE_ARGS=(
-  --continue
-)
+if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+  OPENCODE_ARGS=("${EXTRA_ARGS[@]}")
+else
+  OPENCODE_ARGS=(--continue)
+fi
 docker_exec /entrypoint.sh opencode "${OPENCODE_ARGS[@]}"
