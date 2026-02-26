@@ -311,5 +311,7 @@ if ((DEBUG)); then
 fi
 
 # Run the opencode command in the container
-OPENCODE_ARGS=()
+OPENCODE_ARGS=(
+  --continue
+)
 docker_exec /entrypoint.sh opencode "${OPENCODE_ARGS[@]}"
