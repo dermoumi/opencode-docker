@@ -28,6 +28,7 @@ export TARGET_DIR
 # Base docker arguments
 DIR_HASH="$(echo -n "$TARGET_DIR" | md5sum | cut -c1-4)"
 PROJECT_NAME="opencode-$(basename "$TARGET_DIR")-$DIR_HASH"
+PROJECT_NAME="${PROJECT_NAME,,}"
 
 DOCKER_COMPOSE="$(cat <<'EOF'
 services:
@@ -57,7 +58,7 @@ services:
 
           # Set EDITOR to the code wrapper if VS Code FIFO is available
           if [[ -p /tmp/vscode_fifo ]]; then
-            export EDITOR="code"
+            export EDITOR="code -w"
           fi
 
           exec "$$@"
@@ -66,15 +67,22 @@ services:
 
           # FIFO-based host signaling
           ARGS=()
+          WAIT=0
           for arg in "$$@"; do
-            if [[ "$$arg" == -* ]]; then
+            if [[ "$$arg" == "-w" || "$$arg" == "--wait" ]]; then
+              WAIT=1
+              ARGS+=("$$arg")
+            elif [[ "$$arg" == -* ]]; then
               ARGS+=("$$arg")
             else
               ARGS+=("$$(realpath "$$arg")")
             fi
           done
           echo "$${ARGS[*]}" > /tmp/vscode_fifo
-          read -r < /tmp/vscode_fifo_resp
+          # Only wait for host response if -w/--wait was passed
+          if [[ "$$WAIT" -eq 1 ]]; then
+            read -r < /tmp/vscode_fifo_resp
+          fi
       dockerfile_inline: |
         FROM archlinux:latest
 
@@ -269,7 +277,10 @@ if ((HAS_CODE)); then
         fi
 
         code "${code_args[@]}"
-        echo "done" > "$VSCODE_FIFO_RESP"
+        # Only signal response if -w/--wait was requested
+        if [[ " ${flags[*]} " == *" -w "* || " ${flags[*]} " == *" --wait "* ]]; then
+          echo "done" > "$VSCODE_FIFO_RESP"
+        fi
       fi
     done
   ) &
@@ -291,7 +302,6 @@ if ((VSCODE)); then
     exit 1
   fi
   open_vscode /workspace
-  exit 0
 fi
 
 # Shell into the container if in debug mode
