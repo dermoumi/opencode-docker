@@ -14,13 +14,18 @@ while getopts "bdDl" opt; do
     d) DOWN=1;;
     D) DEBUG=1;;
     l) LOCAL=1;;
-    *) echo "Usage: ocode [-b] [-d] [-D] [-l]"; exit 1;;
+    *) echo "Usage: ocode [-b] [-d] [-D] [-l] [directory]"; exit 1;;
   esac
 done
+shift $((OPTIND - 1))
+
+# Target directory (first positional arg or current directory)
+TARGET_DIR="$(realpath "${1:-$PWD}")"
+export TARGET_DIR
 
 # Base docker arguments
-DIR_HASH="$(echo -n "$PWD" | md5sum | cut -c1-4)"
-PROJECT_NAME="opencode-$(basename "$PWD")-$DIR_HASH"
+DIR_HASH="$(echo -n "$TARGET_DIR" | md5sum | cut -c1-4)"
+PROJECT_NAME="opencode-$(basename "$TARGET_DIR")-$DIR_HASH"
 
 DOCKER_COMPOSE="$(cat <<'EOF'
 services:
@@ -98,7 +103,7 @@ services:
         # Initial command to just keep the container running
         CMD ["bash", "-c", "sleep infinity"]
     volumes:
-      - ${PWD}:/workspace
+      - ${TARGET_DIR}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
       - ${SSH_AUTH_SOCK:-/dev/null}:/tmp/ssh_auth_sock
       - ${GNUPG_SOCK:-/dev/null}:/tmp/gnupg_sock
