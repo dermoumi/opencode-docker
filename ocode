@@ -6,15 +6,17 @@ set -e
 DEBUG=0
 BUILD=0
 DOWN=0
+VSCODE=0
 
 # Parse flags
-while getopts "bdDl" opt; do
+while getopts "bdDlv" opt; do
   case $opt in
     b) BUILD=1;;
     d) DOWN=1;;
     D) DEBUG=1;;
     l) LOCAL=1;;
-    *) echo "Usage: ocode [-b] [-d] [-D] [-l] [directory]"; exit 1;;
+    v) VSCODE=1;;
+    *) echo "Usage: ocode [-b] [-d] [-D] [-l] [-v] [directory]"; exit 1;;
   esac
 done
 shift $((OPTIND - 1))
@@ -53,7 +55,26 @@ services:
             ln -sf /tmp/host_gitconfig "$$HOME/.gitconfig"
           fi
 
+          # Set EDITOR to the code wrapper if VS Code FIFO is available
+          if [[ -p /tmp/vscode_fifo ]]; then
+            export EDITOR="code"
+          fi
+
           exec "$$@"
+        CODE_WRAPPER: |
+          #!/bin/bash
+
+          # FIFO-based host signaling
+          ARGS=()
+          for arg in "$$@"; do
+            if [[ "$$arg" == -* ]]; then
+              ARGS+=("$$arg")
+            else
+              ARGS+=("$$(realpath "$$arg")")
+            fi
+          done
+          echo "$${ARGS[*]}" > /tmp/vscode_fifo
+          read -r < /tmp/vscode_fifo_resp
       dockerfile_inline: |
         FROM archlinux:latest
 
@@ -81,6 +102,11 @@ services:
 
         ENTRYPOINT ["/entrypoint.sh"]
 
+        # Create a 'code' wrapper that signals the host to open VS Code
+        ARG CODE_WRAPPER
+        RUN echo "$$CODE_WRAPPER" > /usr/local/bin/code
+        RUN chmod +x /usr/local/bin/code
+
         # Switch to the non-root user
         USER $$USER
 
@@ -91,7 +117,7 @@ services:
 
         # Install opencode
         RUN curl -fsSL https://opencode.ai/install | bash
-        ENV PATH="/home/$$USER/.opencode/bin:$$PATH"
+        ENV PATH="/home/$$USER/.opencode/bin:/usr/local/bin:$$PATH"
 
         # Install yay (AUR helper) as the non-root user
         RUN git clone https://aur.archlinux.org/yay.git \
@@ -111,6 +137,8 @@ services:
       - ${OPENCODE_SHARE:-opencode_share}:/home/dev/.local/share/opencode
       - ${OPENCODE_STATE:-opencode_state}:/home/dev/.local/state/opencode
       - ${OPENCODE_CONFIG:-opencode_config}:/home/dev/.config/opencode
+      - ${VSCODE_FIFO:-/dev/null}:/tmp/vscode_fifo
+      - ${VSCODE_FIFO_RESP:-/dev/null}:/tmp/vscode_fifo_resp
 
 volumes:
   opencode_share:
@@ -136,6 +164,10 @@ docker_exec() {
 # Tear down the compose file and exit if requested
 if ((DOWN)); then
   compose down
+  # Clean up the VS Code FIFOs
+  VSCODE_FIFO="/tmp/ocode-vscode-${PROJECT_NAME}.fifo"
+  VSCODE_FIFO_RESP="/tmp/ocode-vscode-${PROJECT_NAME}-resp.fifo"
+  rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"
   exit 0
 fi
 
@@ -149,6 +181,21 @@ fi
 # Setup gitconfig if it exists
 if [[ -f "$HOME/.gitconfig" ]]; then
   export GITCONFIG="$HOME/.gitconfig"
+fi
+
+# Setup the VS Code FIFOs if 'code' is available on the host
+HAS_CODE=0
+if command -v code &>/dev/null; then
+  HAS_CODE=1
+  VSCODE_FIFO="/tmp/ocode-vscode-${PROJECT_NAME}.fifo"
+  VSCODE_FIFO_RESP="/tmp/ocode-vscode-${PROJECT_NAME}-resp.fifo"
+  for fifo in "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"; do
+    if [[ ! -p "$fifo" ]]; then
+      mkfifo "$fifo"
+      chmod 666 "$fifo"
+    fi
+  done
+  export VSCODE_FIFO VSCODE_FIFO_RESP
 fi
 
 # Run the compose file
@@ -173,6 +220,80 @@ if [[ -S "$GNUPG_SOCK" ]]; then
   gpg --export -a | docker exec -i "$(get_container_id)" gpg --import >/dev/null 2>&1
 fi
 
+# Helper to open VS Code attached to the container
+open_vscode() {
+  local container_id path hex_id
+  container_id="$(get_container_id)"
+  path="${1:-/workspace}"
+  hex_id="$(printf '%s' "$container_id" | od -A n -t x1 | tr -d ' \n')"
+  code --folder-uri "vscode-remote://attached-container+${hex_id}${path}"
+}
+
+# Start background watcher and VS Code integration if 'code' is available
+WATCHER_PID=""
+if ((HAS_CODE)); then
+  (
+    while true; do
+      if read -r args < "$VSCODE_FIFO"; then
+        container_id="$(get_container_id)"
+        hex_id="$(printf '%s' "$container_id" | od -A n -t x1 | tr -d ' \n')"
+        uri_base="vscode-remote://attached-container+${hex_id}"
+
+        # Separate flags from paths
+        flags=()
+        paths=()
+        # shellcheck disable=SC2086
+        for arg in $args; do
+          if [[ "$arg" == -* ]]; then
+            flags+=("$arg")
+          else
+            paths+=("$arg")
+          fi
+        done
+
+        # Build code command with correct URI type for each path
+        code_args=("${flags[@]}")
+        has_folder=0
+        for path in "${paths[@]}"; do
+          if docker exec "$container_id" test -d "$path" 2>/dev/null; then
+            has_folder=1
+            code_args+=("--folder-uri" "${uri_base}${path}")
+          else
+            code_args+=("--file-uri" "${uri_base}${path}")
+          fi
+        done
+
+        # Always attach to /workspace unless a directory was explicitly given
+        if [[ "$has_folder" -eq 0 ]]; then
+          code_args+=("--folder-uri" "${uri_base}/workspace")
+        fi
+
+        code "${code_args[@]}"
+        echo "done" > "$VSCODE_FIFO_RESP"
+      fi
+    done
+  ) &
+  WATCHER_PID=$!
+fi
+
+# Clean up watcher on exit
+cleanup() {
+  if [[ -n "$WATCHER_PID" ]]; then
+    kill "$WATCHER_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+# Open VS Code if requested via -v flag
+if ((VSCODE)); then
+  if ! ((HAS_CODE)); then
+    echo "Error: 'code' command not found on host" >&2
+    exit 1
+  fi
+  open_vscode /workspace
+  exit 0
+fi
+
 # Shell into the container if in debug mode
 if ((DEBUG)); then
   docker_exec /entrypoint.sh bash
@@ -181,4 +302,4 @@ fi
 
 # Run the opencode command in the container
 OPENCODE_ARGS=()
-docker_exec opencode "${OPENCODE_ARGS[@]}"
+docker_exec /entrypoint.sh opencode "${OPENCODE_ARGS[@]}"
