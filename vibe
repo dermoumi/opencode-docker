@@ -188,6 +188,8 @@ services:
 
         # Initial command to just keep the container running
         CMD ["bash", "-c", "sleep infinity"]
+    ports:
+      - 0:4096
     volumes:
       - ${TARGET_DIR}:/${PROJECT_NAME}/workspace
       - /var/run/docker.sock:/var/run/docker.sock
@@ -385,7 +387,9 @@ fi
 if ((WEB)); then
   case "$TOOL" in
     opencode)
-      docker_exec /entrypoint.sh "$TOOL" --port 4096 --hostname 0.0.0.0 "${EXTRA_ARGS[@]}"
+      PORT=$(docker port "$(get_container_id)" 4096 | head -1 | cut -d: -f2)
+      docker_exec /entrypoint.sh "$TOOL" web --port 4096 --hostname 0.0.0.0 "${EXTRA_ARGS[@]}" 2>&1 \
+        | sed -u "s|localhost:4096|localhost:$PORT|g"
       ;;
     claude)
       docker_exec /entrypoint.sh "$TOOL" --dangerously-skip-permissions --remote "${EXTRA_ARGS[@]}"
