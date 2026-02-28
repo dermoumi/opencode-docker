@@ -403,7 +403,20 @@ fi
 echo "Running '$TOOL' in container..."
 if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
   docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}" "${EXTRA_ARGS[@]}"
+elif [[ "$TOOL" == "claude" ]]; then
+  CLAUDE_PROJECT_DIR="/home/dev/.claude/projects/-${PROJECT_NAME}-workspace"
+  : "$(
+    docker_exec bash -c 'ls -t '"${CLAUDE_PROJECT_DIR}"'/*.jsonl' 2>/dev/null \
+    | head -1 | xargs -r basename
+  )"
+  SESSION_ID="${_%.*}" # Strip .jsonl suffix
+
+  if [[ -n "$SESSION_ID" ]]; then
+    echo "Resuming session $SESSION_ID"
+    docker_exec /entrypoint.sh "$TOOL" --resume "$SESSION_ID" "${TOOL_FLAGS[@]}"
+  else
+    docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}"
+  fi
 else
-  docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}" --resume \
-    || docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}"
+  docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}" --continue
 fi
