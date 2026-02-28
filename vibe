@@ -387,17 +387,22 @@ if ((WEB)); then
       docker_exec /entrypoint.sh "$TOOL" --port 4096 --hostname 0.0.0.0 "${EXTRA_ARGS[@]}"
       ;;
     claude)
-      docker_exec /entrypoint.sh "$TOOL" --remote "${EXTRA_ARGS[@]}"
+      docker_exec /entrypoint.sh "$TOOL" --dangerously-skip-permissions --remote "${EXTRA_ARGS[@]}"
       ;;
   esac
   exit 0
 fi
 
 # Run the selected tool in the container
+TOOL_FLAGS=()
+if [[ "$TOOL" == "claude" ]]; then
+  TOOL_FLAGS+=(--dangerously-skip-permissions)
+fi
+
 echo "Running '$TOOL' in container..."
 if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
-  docker_exec /entrypoint.sh "$TOOL" "${EXTRA_ARGS[@]}"
+  docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}" "${EXTRA_ARGS[@]}"
 else
-  docker_exec /entrypoint.sh "$TOOL" --continue \
-    || docker_exec /entrypoint.sh "$TOOL"
+  docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}" --continue \
+    || docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}"
 fi
