@@ -380,26 +380,24 @@ if ((DEBUG)); then
   exit 0
 fi
 
-# Build the tool command
-if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
-  TOOL_ARGS=("${EXTRA_ARGS[@]}")
-else
-  TOOL_ARGS=(--continue)
-fi
-
 # Web UI mode
 if ((WEB)); then
   case "$TOOL" in
     opencode)
-      TOOL_ARGS=(--port 4096 --hostname 0.0.0.0 "${TOOL_ARGS[@]}")
+      docker_exec /entrypoint.sh "$TOOL" --port 4096 --hostname 0.0.0.0 "${EXTRA_ARGS[@]}"
       ;;
     claude)
-      TOOL_ARGS=(--remote "${TOOL_ARGS[@]}")
+      docker_exec /entrypoint.sh "$TOOL" --remote "${EXTRA_ARGS[@]}"
       ;;
   esac
   exit 0
 fi
 
 # Run the selected tool in the container
-echo "Running '$TOOL ${TOOL_ARGS[*]}' in container..."
-docker_exec /entrypoint.sh "$TOOL" "${TOOL_ARGS[@]}"
+echo "Running '$TOOL' in container..."
+if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+  docker_exec /entrypoint.sh "$TOOL" "${EXTRA_ARGS[@]}"
+else
+  docker_exec /entrypoint.sh "$TOOL" --continue \
+    || docker_exec /entrypoint.sh "$TOOL"
+fi
