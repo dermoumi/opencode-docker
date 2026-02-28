@@ -7,24 +7,49 @@ DEBUG=0
 BUILD=0
 DOWN=0
 VSCODE=0
+WEB=0
+
+WEB_PORT=4096
+# if command -v shuf &>/dev/null; then
+#   WEB_PORT=$(shuf -i 5000-65535 -n 1)
+# fi
+
+# Tool state directory
+STATE_DIR="${HOME}/.local/state/vibe"
+LAST_TOOL_FILE="${STATE_DIR}/last-tool"
+
+# Read last-used tool (default to opencode)
+TOOL=""
+if [[ -f "$LAST_TOOL_FILE" ]]; then
+  TOOL="$(cat "$LAST_TOOL_FILE")"
+fi
+TOOL="${TOOL:-opencode}"
 
 # Parse flags
-while getopts "bdDlv" opt; do
+while getopts "bcdDlop:vw" opt; do
   case $opt in
     b) BUILD=1;;
+    c) TOOL=claude;;
     d) DOWN=1;;
     D) DEBUG=1;;
     l) LOCAL=1;;
+    o) TOOL=opencode;;
+    p) WEB_PORT="$OPTARG";;
     v) VSCODE=1;;
-    *) echo "Usage: ocode [-b] [-d] [-D] [-l] [-v] [directory]"; exit 1;;
+    w) WEB=1;;
+    *) echo "Usage: vibe [-b] [-c] [-d] [-D] [-l] [-o] [-p PORT] [-v] [-w] [directory] [-- args...]"; exit 1;;
   esac
 done
 shift $((OPTIND - 1))
 
+# Persist tool choice
+mkdir -p "$STATE_DIR"
+echo "$TOOL" > "$LAST_TOOL_FILE"
+
 # Split positional args at -- separator
 EXTRA_ARGS=()
 if [[ "${1:-}" == "--" ]]; then
-  # No directory arg, rest goes to opencode
+  # No directory arg, rest goes to tool
   shift
   EXTRA_ARGS=("$@")
   TARGET_DIR="$PWD"
@@ -40,12 +65,14 @@ export TARGET_DIR
 
 # Base docker arguments
 DIR_HASH="$(echo -n "$TARGET_DIR" | md5sum | cut -c1-4)"
-PROJECT_NAME="opencode-$(basename "$TARGET_DIR")-$DIR_HASH"
+PROJECT_NAME="vibe-$(basename "$TARGET_DIR")-$DIR_HASH"
 PROJECT_NAME="${PROJECT_NAME,,}"
+
+export WEB_PORT
 
 DOCKER_COMPOSE="$(cat <<'EOF'
 services:
-  opencode:
+  vibe:
     build:
       args:
         UID: ${UID:-1000}
@@ -67,6 +94,15 @@ services:
 
           if [[ -f /tmp/host_gitconfig ]]; then
             ln -sf /tmp/host_gitconfig "$$HOME/.gitconfig"
+          fi
+
+          if [[ -f /tmp/host_claude_json ]]; then
+            ln -sf /tmp/host_claude_json "$$HOME/.claude.json"
+          else
+            if [[ ! -f "$$HOME/.claude/claude.json" ]]; then
+              echo '{}' > "$$HOME/.claude/claude.json"
+            fi
+            ln -sf "$$HOME/.claude/claude.json" "$$HOME/.claude.json"
           fi
 
           # Set EDITOR to the code wrapper if VS Code FIFO is available
@@ -101,7 +137,7 @@ services:
 
         # Install minimal dependencies
         RUN pacman -Syu --noconfirm \
-          base-devel git sudo docker openssh
+          base-devel git sudo docker openssh nodejs npm
 
         # Create a non-root user and make it sudoer without password
         ENV USER=dev
@@ -123,22 +159,30 @@ services:
 
         ENTRYPOINT ["/entrypoint.sh"]
 
-        # Create a 'code' wrapper that signals the host to open VS Code
-        ARG CODE_WRAPPER
-        RUN echo "$$CODE_WRAPPER" > /usr/local/bin/code
-        RUN chmod +x /usr/local/bin/code
-
         # Switch to the non-root user
         USER $$USER
 
-        # Premake some directories for opencode
-        RUN mkdir -p /home/$$USER/.local/share/opencode \
-          && mkdir -p /home/$$USER/.local/state/opencode \
-          && mkdir -p /home/$$USER/.config/opencode
+        # Premake some directories to avoid permission issues
+        RUN mkdir -p \
+          /home/$$USER/.local/bin \
+          /home/$$USER/.local/share/opencode \
+          /home/$$USER/.local/state/opencode \
+          /home/$$USER/.config/opencode \
+          /home/$$USER/.claude
+
+        # Create a 'code' wrapper that signals the host to open VS Code
+        ARG CODE_WRAPPER
+        RUN echo "$$CODE_WRAPPER" > /home/$$USER/.local/bin/code
+        RUN chmod +x /home/$$USER/.local/bin/code
 
         # Install opencode
         RUN curl -fsSL https://opencode.ai/install | bash
-        ENV PATH="/home/$$USER/.opencode/bin:/usr/local/bin:$$PATH"
+
+        # Install Claude Code
+        RUN curl -fsSL https://claude.ai/install.sh | bash
+
+        # Update the PATH
+        ENV PATH="/home/$$USER/.opencode/bin:/home/$$USER/.local/bin:$$PATH"
 
         # Install yay (AUR helper) as the non-root user
         RUN git clone https://aur.archlinux.org/yay.git \
@@ -149,15 +193,19 @@ services:
 
         # Initial command to just keep the container running
         CMD ["bash", "-c", "sleep infinity"]
+    ports:
+      - "${WEB_PORT:-4096}:4096"
     volumes:
       - ${TARGET_DIR}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
       - ${SSH_AUTH_SOCK:-/dev/null}:/tmp/ssh_auth_sock
       - ${GNUPG_SOCK:-/dev/null}:/tmp/gnupg_sock
       - ${GITCONFIG:-/dev/null}:/tmp/host_gitconfig
+      - ${CLAUDE_JSON:-/dev/null}:/tmp/host_claude_json
       - ${OPENCODE_SHARE:-opencode_share}:/home/dev/.local/share/opencode
       - ${OPENCODE_STATE:-opencode_state}:/home/dev/.local/state/opencode
       - ${OPENCODE_CONFIG:-opencode_config}:/home/dev/.config/opencode
+      - ${CLAUDE_HOME:-claude_home}:/home/dev/.claude
       - ${VSCODE_FIFO:-/dev/null}:/tmp/vscode_fifo
       - ${VSCODE_FIFO_RESP:-/dev/null}:/tmp/vscode_fifo_resp
 
@@ -165,6 +213,7 @@ volumes:
   opencode_share:
   opencode_state:
   opencode_config:
+  claude_home:
 EOF
 )"
 
@@ -174,7 +223,7 @@ compose() {
 }
 
 get_container_id() {
-  docker ps --filter "name=${PROJECT_NAME}-opencode-1" -q
+  docker ps --filter "name=${PROJECT_NAME}-vibe-1" -q
 }
 
 docker_exec() {
@@ -186,8 +235,8 @@ docker_exec() {
 if ((DOWN)); then
   compose down
   # Clean up the VS Code FIFOs
-  VSCODE_FIFO="/tmp/ocode-vscode-${PROJECT_NAME}.fifo"
-  VSCODE_FIFO_RESP="/tmp/ocode-vscode-${PROJECT_NAME}-resp.fifo"
+  VSCODE_FIFO="/tmp/vibe-vscode-${PROJECT_NAME}.fifo"
+  VSCODE_FIFO_RESP="/tmp/vibe-vscode-${PROJECT_NAME}-resp.fifo"
   rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"
   exit 0
 fi
@@ -208,8 +257,8 @@ fi
 HAS_CODE=0
 if command -v code &>/dev/null; then
   HAS_CODE=1
-  VSCODE_FIFO="/tmp/ocode-vscode-${PROJECT_NAME}.fifo"
-  VSCODE_FIFO_RESP="/tmp/ocode-vscode-${PROJECT_NAME}-resp.fifo"
+  VSCODE_FIFO="/tmp/vibe-vscode-${PROJECT_NAME}.fifo"
+  VSCODE_FIFO_RESP="/tmp/vibe-vscode-${PROJECT_NAME}-resp.fifo"
   for fifo in "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"; do
     if [[ ! -p "$fifo" ]]; then
       mkfifo "$fifo"
@@ -219,15 +268,23 @@ if command -v code &>/dev/null; then
   export VSCODE_FIFO VSCODE_FIFO_RESP
 fi
 
-# Run the compose file
+# Setup host config directories (default) or use local Docker volumes (-l flag)
 if ! ((LOCAL)); then
   mkdir -p "${HOME}/.local/share/opencode"
   mkdir -p "${HOME}/.local/state/opencode"
   mkdir -p "${HOME}/.config/opencode"
+  mkdir -p "${HOME}/.claude"
 
   export OPENCODE_SHARE="${HOME}/.local/share/opencode"
   export OPENCODE_STATE="${HOME}/.local/state/opencode"
   export OPENCODE_CONFIG="${HOME}/.config/opencode"
+  export CLAUDE_HOME="${HOME}/.claude"
+
+  # Ensure the file exists with valid JSON so Docker can mount it as a file
+  if [[ ! -f "${HOME}/.claude.json" ]]; then
+    echo '{}' > "${HOME}/.claude.json"
+  fi
+  export CLAUDE_JSON="${HOME}/.claude.json"
 fi
 
 UP_ARGS=()
@@ -323,10 +380,26 @@ if ((DEBUG)); then
   exit 0
 fi
 
-# Run the opencode command in the container
+# Build the tool command
 if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
-  OPENCODE_ARGS=("${EXTRA_ARGS[@]}")
+  TOOL_ARGS=("${EXTRA_ARGS[@]}")
 else
-  OPENCODE_ARGS=(--continue)
+  TOOL_ARGS=(--continue)
 fi
-docker_exec /entrypoint.sh opencode "${OPENCODE_ARGS[@]}"
+
+# Web UI mode
+if ((WEB)); then
+  case "$TOOL" in
+    opencode)
+      TOOL_ARGS=(--port 4096 --hostname 0.0.0.0 "${TOOL_ARGS[@]}")
+      ;;
+    claude)
+      TOOL_ARGS=(--remote "${TOOL_ARGS[@]}")
+      ;;
+  esac
+  exit 0
+fi
+
+# Run the selected tool in the container
+echo "Running '$TOOL ${TOOL_ARGS[*]}' in container..."
+docker_exec /entrypoint.sh "$TOOL" "${TOOL_ARGS[@]}"
