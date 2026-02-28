@@ -305,7 +305,7 @@ fi
 open_vscode() {
   local container_id path hex_id
   container_id="$(get_container_id)"
-  path="${1:-/workspace}"
+  path="${1:-/$PROJECT_NAME/workspace}"
   hex_id="$(printf '%s' "$container_id" | od -A n -t x1 | tr -d ' \n')"
   code --folder-uri "vscode-remote://attached-container+${hex_id}${path}"
 }
@@ -346,7 +346,7 @@ if ((HAS_CODE)); then
 
         # Always attach to /workspace unless a directory was explicitly given
         if [[ "$has_folder" -eq 0 ]]; then
-          code_args+=("--folder-uri" "${uri_base}/workspace")
+          code_args+=("--folder-uri" "${uri_base}/$PROJECT_NAME/workspace")
         fi
 
         code "${code_args[@]}"
@@ -374,7 +374,7 @@ if ((VSCODE)); then
     echo "Error: 'code' command not found on host" >&2
     exit 1
   fi
-  open_vscode /workspace
+  open_vscode /$PROJECT_NAME/workspace
 fi
 
 # Shell into the container if in debug mode
