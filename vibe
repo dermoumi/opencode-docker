@@ -9,11 +9,6 @@ DOWN=0
 VSCODE=0
 WEB=0
 
-WEB_PORT=4096
-# if command -v shuf &>/dev/null; then
-#   WEB_PORT=$(shuf -i 5000-65535 -n 1)
-# fi
-
 # Tool state directory
 STATE_DIR="${HOME}/.local/state/vibe"
 LAST_TOOL_FILE="${STATE_DIR}/last-tool"
@@ -26,7 +21,7 @@ fi
 TOOL="${TOOL:-opencode}"
 
 # Parse flags
-while getopts "bcdDlop:vw" opt; do
+while getopts "bcdDlovw" opt; do
   case $opt in
     b) BUILD=1;;
     c) TOOL=claude;;
@@ -34,10 +29,9 @@ while getopts "bcdDlop:vw" opt; do
     D) DEBUG=1;;
     l) LOCAL=1;;
     o) TOOL=opencode;;
-    p) WEB_PORT="$OPTARG";;
     v) VSCODE=1;;
     w) WEB=1;;
-    *) echo "Usage: vibe [-b] [-c] [-d] [-D] [-l] [-o] [-p PORT] [-v] [-w] [directory] [-- args...]"; exit 1;;
+    *) echo "Usage: vibe [-b] [-c] [-d] [-D] [-l] [-o] [-v] [-w] [directory] [-- args...]"; exit 1;;
   esac
 done
 shift $((OPTIND - 1))
@@ -66,9 +60,7 @@ export TARGET_DIR
 # Base docker arguments
 DIR_HASH="$(echo -n "$TARGET_DIR" | md5sum | cut -c1-4)"
 PROJECT_NAME="vibe-$(basename "$TARGET_DIR")-$DIR_HASH"
-PROJECT_NAME="${PROJECT_NAME,,}"
-
-export WEB_PORT
+export PROJECT_NAME="${PROJECT_NAME,,}"
 
 DOCKER_COMPOSE="$(cat <<'EOF'
 services:
@@ -77,6 +69,7 @@ services:
       args:
         UID: ${UID:-1000}
         GID: ${GID:-1000}
+        PROJECT_NAME: ${PROJECT_NAME}
         ENTRYPOINT: |
           #!/bin/bash
 
@@ -148,9 +141,10 @@ services:
           && echo "$$USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$$USER
 
         # Set the working directory
-        RUN mkdir -p /workspace \
-          && chown $$USER:$$USER /workspace
-        WORKDIR /workspace
+        ARG PROJECT_NAME
+        RUN mkdir -p /$$PROJECT_NAME/workspace \
+          && chown $$USER:$$USER /$$PROJECT_NAME/workspace
+        WORKDIR /$$PROJECT_NAME/workspace
 
         # Create entrypoint script
         ARG ENTRYPOINT
@@ -167,6 +161,7 @@ services:
           /home/$$USER/.local/bin \
           /home/$$USER/.local/share/opencode \
           /home/$$USER/.local/state/opencode \
+          /home/$$USER/.local/state/claude \
           /home/$$USER/.config/opencode \
           /home/$$USER/.claude
 
@@ -193,10 +188,8 @@ services:
 
         # Initial command to just keep the container running
         CMD ["bash", "-c", "sleep infinity"]
-    ports:
-      - "${WEB_PORT:-4096}:4096"
     volumes:
-      - ${TARGET_DIR}:/workspace
+      - ${TARGET_DIR}:/${PROJECT_NAME}/workspace
       - /var/run/docker.sock:/var/run/docker.sock
       - ${SSH_AUTH_SOCK:-/dev/null}:/tmp/ssh_auth_sock
       - ${GNUPG_SOCK:-/dev/null}:/tmp/gnupg_sock
@@ -206,6 +199,7 @@ services:
       - ${OPENCODE_STATE:-opencode_state}:/home/dev/.local/state/opencode
       - ${OPENCODE_CONFIG:-opencode_config}:/home/dev/.config/opencode
       - ${CLAUDE_HOME:-claude_home}:/home/dev/.claude
+      - ${CLAUDE_STATE:-claude_state}:/home/dev/.local/state/claude
       - ${VSCODE_FIFO:-/dev/null}:/tmp/vscode_fifo
       - ${VSCODE_FIFO_RESP:-/dev/null}:/tmp/vscode_fifo_resp
 
@@ -214,6 +208,7 @@ volumes:
   opencode_state:
   opencode_config:
   claude_home:
+  claude_state:
 EOF
 )"
 
@@ -228,6 +223,7 @@ get_container_id() {
 
 docker_exec() {
   # Use different detach keys to avoid conflicts with opencode's CTRL+P
+  # Use -w to set CWD to the host path so tools key project data correctly
   docker exec -it --detach-keys='ctrl-e,e' "$(get_container_id)" "$@"
 }
 
@@ -270,21 +266,26 @@ fi
 
 # Setup host config directories (default) or use local Docker volumes (-l flag)
 if ! ((LOCAL)); then
-  mkdir -p "${HOME}/.local/share/opencode"
-  mkdir -p "${HOME}/.local/state/opencode"
-  mkdir -p "${HOME}/.config/opencode"
-  mkdir -p "${HOME}/.claude"
+  if [[ "$TOOL" == "opencode" ]]; then
+    export OPENCODE_SHARE="${HOME}/.local/share/opencode"
+    export OPENCODE_STATE="${HOME}/.local/state/opencode"
+    export OPENCODE_CONFIG="${HOME}/.config/opencode"
 
-  export OPENCODE_SHARE="${HOME}/.local/share/opencode"
-  export OPENCODE_STATE="${HOME}/.local/state/opencode"
-  export OPENCODE_CONFIG="${HOME}/.config/opencode"
-  export CLAUDE_HOME="${HOME}/.claude"
+    mkdir -p "$OPENCODE_SHARE"
+    mkdir -p "$OPENCODE_STATE"
+    mkdir -p "$OPENCODE_CONFIG"
+  else
+    export CLAUDE_STATE="${HOME}/.local/state/claude"
+    export CLAUDE_HOME="${HOME}/.claude"
 
-  # Ensure the file exists with valid JSON so Docker can mount it as a file
-  if [[ ! -f "${HOME}/.claude.json" ]]; then
-    echo '{}' > "${HOME}/.claude.json"
+    mkdir -p "$CLAUDE_STATE" "$CLAUDE_HOME"
+
+    # Ensure the file exists with valid JSON so Docker can mount it as a file
+    export CLAUDE_JSON="${HOME}/.claude.json"
+    if [[ ! -f "$CLAUDE_JSON" ]]; then
+      echo '{}' > "$CLAUDE_JSON"
+    fi
   fi
-  export CLAUDE_JSON="${HOME}/.claude.json"
 fi
 
 UP_ARGS=()
@@ -403,6 +404,6 @@ echo "Running '$TOOL' in container..."
 if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
   docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}" "${EXTRA_ARGS[@]}"
 else
-  docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}" --continue \
+  docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}" --resume \
     || docker_exec /entrypoint.sh "$TOOL" "${TOOL_FLAGS[@]}"
 fi
