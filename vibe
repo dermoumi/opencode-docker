@@ -125,6 +125,7 @@ services:
           if [[ "$$WAIT" -eq 1 ]]; then
             read -r < /tmp/vscode_fifo_resp
           fi
+        ON_BUILD: "${ON_BUILD:-}"
       dockerfile_inline: |
         FROM archlinux:latest
 
@@ -185,6 +186,12 @@ services:
           && makepkg -si --noconfirm \
           && cd .. \
           && rm -rf yay
+
+        # Run the ON_BUILD script if provided (used to pre-install tools)
+        ARG ON_BUILD
+        RUN if [ -n "$$ON_BUILD" ]; then \
+          echo "$$ON_BUILD" | bash; \
+        fi
 
         # Initial command to just keep the container running
         CMD ["bash", "-c", "sleep infinity"]
@@ -264,6 +271,12 @@ if command -v code &>/dev/null; then
     fi
   done
   export VSCODE_FIFO VSCODE_FIFO_RESP
+fi
+
+# Check if the user has an on_build.sh script in ~/.vibe
+ON_BUILD_SCRIPT="${HOME}/.vibe/on_build.sh"
+if [[ -f "$ON_BUILD_SCRIPT" ]]; then
+  export ON_BUILD="$(cat "$ON_BUILD_SCRIPT")"
 fi
 
 # Setup host config directories (default) or use local Docker volumes (-l flag)
