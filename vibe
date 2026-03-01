@@ -21,9 +21,9 @@ fi
 TOOL="${TOOL:-opencode}"
 
 # Parse flags
-while getopts "bcdDlovw" opt; do
+while getopts "BcdDlovw" opt; do
   case $opt in
-    b) BUILD=1;;
+    B) BUILD=1;;
     c) TOOL=claude;;
     d) DOWN=1;;
     D) DEBUG=1;;
@@ -31,7 +31,7 @@ while getopts "bcdDlovw" opt; do
     o) TOOL=opencode;;
     v) VSCODE=1;;
     w) WEB=1;;
-    *) echo "Usage: vibe [-b] [-c] [-d] [-D] [-l] [-o] [-v] [-w] [directory] [-- args...]"; exit 1;;
+    *) echo "Usage: vibe [-B] [-c] [-d] [-D] [-l] [-o] [-v] [-w] [directory] [-- args...]"; exit 1;;
   esac
 done
 shift $((OPTIND - 1))
