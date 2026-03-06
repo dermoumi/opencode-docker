@@ -423,7 +423,7 @@ if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
 elif [[ "$TOOL" == "claude" ]]; then
   CLAUDE_PROJECT_DIR="/home/dev/.claude/projects/-${PROJECT_NAME}-workspace"
   : "$(
-    docker_exec bash -c 'ls -t '"${CLAUDE_PROJECT_DIR}"'/*.jsonl' 2>/dev/null \
+    docker_exec bash -c 'ls -t '"${CLAUDE_PROJECT_DIR}"'/*.jsonl 2>/dev/null' \
     | head -1 | xargs -r basename
   )"
   SESSION_ID="${_%.*}" # Strip .jsonl suffix
