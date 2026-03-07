@@ -412,9 +412,12 @@ if ((WEB)); then
 fi
 
 # Run the selected tool in the container
+SYSTEM_PROMPT="You are in a disposable Docker container with passwordless sudo. Install anything you need freely."
+
 TOOL_FLAGS=()
 if [[ "$TOOL" == "claude" ]]; then
   TOOL_FLAGS+=(--dangerously-skip-permissions)
+  TOOL_FLAGS+=(--append-system-prompt "$SYSTEM_PROMPT")
 fi
 
 echo "Running '$TOOL' in container..."
