@@ -249,7 +249,8 @@ fi
 # Check if the user has an on_build.sh script in ~/.vibe
 ON_BUILD_SCRIPT="$HOME/.claude-docker/on_build.sh"
 if [[ -f "$ON_BUILD_SCRIPT" ]]; then
-  export ON_BUILD="$(cat "$ON_BUILD_SCRIPT")"
+  ON_BUILD="$(cat "$ON_BUILD_SCRIPT")"
+  export ON_BUILD
 fi
 
 # Setup host config directories (default) or use local Docker volumes (-l flag)
@@ -346,7 +347,7 @@ if ((VSCODE)); then
     echo "Error: 'code' command not found on host" >&2
     exit 1
   fi
-  open_vscode /$PROJECT_NAME/workspace
+  open_vscode "/$PROJECT_NAME/workspace"
 fi
 
 # Shell into the container if in debug mode
