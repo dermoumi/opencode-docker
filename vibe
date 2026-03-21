@@ -72,6 +72,18 @@ if [[ ! -d "$TARGET_DIR" ]]; then
 fi
 export TARGET_DIR
 
+# Ensure .vibe/ exists and mount it
+if [[ -n "$WORKTREE" ]]; then
+  VIBE_DIR="$(git rev-parse --show-toplevel)/.vibe"
+else
+  VIBE_DIR="${TARGET_DIR}/.vibe"
+fi
+mkdir -p "$VIBE_DIR"
+if [[ ! -f "$VIBE_DIR/.gitignore" ]]; then
+  echo '*' > "$VIBE_DIR/.gitignore"
+fi
+export VIBE_DIR
+
 # Base docker arguments
 DIR_HASH="$(echo -n "$TARGET_DIR" | md5sum | cut -c1-4)"
 DIR_BASENAME="$(basename "$TARGET_DIR" | tr -cd "a-zA-Z0-9-" | tr " " "-" | tr "." "-" | tr "_" "-")"
@@ -244,6 +256,7 @@ services:
       - ${CLAUDE_STATE:-claude_state}:/home/dev/.local/state/claude
       - ${VSCODE_FIFO:-/dev/null}:/tmp/vscode_fifo
       - ${VSCODE_FIFO_RESP:-/dev/null}:/tmp/vscode_fifo_resp
+      - ${VIBE_DIR}:/${PROJECT_NAME}/workspace/.vibe
 
 volumes:
   claude_home:
@@ -417,7 +430,19 @@ if ((DEBUG)); then
 fi
 
 # Run Claude Code in the container
-SYSTEM_PROMPT="You are in a disposable Docker container with passwordless sudo. Install anything you need freely."
+SYSTEM_PROMPT="
+Disposable Docker container with passwordless sudo — install anything freely.
+After installing a tool, append its directory to ~/.bin-paths.
+At session start, run: export PATH=\"\$(cat ~/.bin-paths 2>/dev/null | tr '\\n' ':'):\$PATH\"
+
+Check .vibe/ for context files (PLAN.md, PROGRESS.md, etc.) and keep them updated. Max 150 lines each.
+
+Be concise. Prefer simple, clean solutions over hacky or overengineered ones.
+When unsure, ask the user. If the implementation diverges significantly from the plan,
+stop and consult the user before proceeding.
+Break large plans into small steps — each step should fit in one reviewable commit.
+Complete one step at a time, then ask before moving to the next.
+"
 
 TOOL_FLAGS=(--dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT")
 
