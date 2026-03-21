@@ -407,9 +407,12 @@ if ((VSCODE)); then
   open_vscode "/$PROJECT_NAME/workspace"
 fi
 
+# Helper for compose exec with explicit working directory
+EXEC=(compose exec -w "/${PROJECT_NAME}/workspace" claude)
+
 # Shell into the container if in debug mode
 if ((DEBUG)); then
-  compose exec claude /entrypoint.sh bash
+  "${EXEC[@]}" /entrypoint.sh bash
   exit 0
 fi
 
@@ -420,20 +423,21 @@ TOOL_FLAGS=(--dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMP
 
 echo "Running 'claude' in container..."
 if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
-  compose exec claude /entrypoint.sh claude "${TOOL_FLAGS[@]}" "${EXTRA_ARGS[@]}"
+  "${EXEC[@]}" /entrypoint.sh claude "${TOOL_FLAGS[@]}" "${EXTRA_ARGS[@]}"
 else
   CLAUDE_PROJECT_DIR="/home/dev/.claude/projects/-${PROJECT_NAME}-workspace"
   : "$(
-    compose exec claude bash -c 'ls -t '"${CLAUDE_PROJECT_DIR}"'/*.jsonl 2>/dev/null' \
+    compose exec -T -w "/${PROJECT_NAME}/workspace" claude \
+    bash -c 'ls -t '"${CLAUDE_PROJECT_DIR}"'/*.jsonl 2>/dev/null' \
     | head -1 | xargs -r basename
   )"
   SESSION_ID="${_%.*}" # Strip .jsonl suffix
 
   if [[ -n "$SESSION_ID" ]]; then
     echo "Resuming session $SESSION_ID"
-    compose exec claude /entrypoint.sh claude --resume "$SESSION_ID" "${TOOL_FLAGS[@]}"
+    "${EXEC[@]}" /entrypoint.sh claude --resume "$SESSION_ID" "${TOOL_FLAGS[@]}"
   else
-    compose exec claude /entrypoint.sh claude "${TOOL_FLAGS[@]}"
+    "${EXEC[@]}" /entrypoint.sh claude "${TOOL_FLAGS[@]}"
   fi
 fi
 
