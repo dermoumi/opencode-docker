@@ -36,23 +36,24 @@ elif [[ "${1:-}" == w:* ]]; then
   # Git worktree mode: create/reuse a worktree under .w/
   WORKTREE_BRANCH="${1#w:}"
   WORKTREE_BASE="$(git rev-parse --show-toplevel)/.w"
-  WORKTREE_DIR="${WORKTREE_BASE}/${WORKTREE_BRANCH}"
 
   mkdir -p "$WORKTREE_BASE"
   if [[ ! -f "$WORKTREE_BASE/.gitignore" ]]; then
     echo '*' > "$WORKTREE_BASE/.gitignore"
   fi
 
-  if [[ ! -d "$WORKTREE_DIR" ]]; then
+  WORKTREE="${WORKTREE_BASE}/${WORKTREE_BRANCH}"
+  if [[ ! -d "$WORKTREE" ]]; then
     if git show-ref --verify --quiet "refs/heads/$WORKTREE_BRANCH"; then
-      git worktree add "$WORKTREE_DIR" "$WORKTREE_BRANCH"
+      git worktree add --relative-paths "$WORKTREE" "$WORKTREE_BRANCH"
     else
-      git worktree add -b "$WORKTREE_BRANCH" "$WORKTREE_DIR"
+      git worktree add --relative-paths -b "$WORKTREE_BRANCH" "$WORKTREE"
     fi
   fi
 
-  TARGET_DIR="$(realpath "$WORKTREE_DIR")"
-  WORKTREE="$WORKTREE_DIR"
+  # Mount the entire repo so git worktree paths resolve inside the container
+  TARGET_DIR="$(git rev-parse --show-toplevel)"
+  WORKTREE_REL=".w/${WORKTREE_BRANCH}"
   shift
   if [[ "${1:-}" == "--" ]]; then
     shift
@@ -88,10 +89,10 @@ export VIBE_DIR
 DIR_HASH="$(echo -n "$TARGET_DIR" | md5sum | cut -c1-4)"
 DIR_BASENAME="$(basename "$TARGET_DIR" | tr -cd "a-zA-Z0-9-" | tr " " "-" | tr "." "-" | tr "_" "-")"
 
-# Make sure to use the base repo's name when using worktrees
+# For worktrees, include the branch name (DIR_BASENAME is already the repo name)
 if [[ -n "$WORKTREE" ]]; then
-  REPO_BASENAME="$(basename "$(git rev-parse --show-toplevel)" | tr -cd "a-zA-Z0-9-" | tr " " "-" | tr "." "-" | tr "_" "-")"
-  PROJECT_NAME="vibe-${REPO_BASENAME}-${DIR_BASENAME}-${DIR_HASH}"
+  BRANCH_BASENAME="$(echo "$WORKTREE_BRANCH" | tr -cd "a-zA-Z0-9-" | tr " " "-" | tr "." "-" | tr "_" "-")"
+  PROJECT_NAME="vibe-${DIR_BASENAME}-${BRANCH_BASENAME}-${DIR_HASH}"
 else
   PROJECT_NAME="vibe-${DIR_BASENAME}-${DIR_HASH}"
 fi
@@ -276,10 +277,8 @@ get_container_id() {
 # Tear down the compose file and exit if requested
 if ((DOWN)); then
   compose down
-  # Clean up the VS Code FIFOs
-  VSCODE_FIFO="/tmp/vibe-vscode-${PROJECT_NAME}.fifo"
-  VSCODE_FIFO_RESP="/tmp/vibe-vscode-${PROJECT_NAME}-resp.fifo"
-  rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"
+  # Clean up any VS Code FIFOs for this project
+  rm -f /tmp/vibe-vscode-"${PROJECT_NAME}"-*.fifo
   exit 0
 fi
 
@@ -301,13 +300,12 @@ fi
 HAS_CODE=0
 if command -v code &>/dev/null; then
   HAS_CODE=1
-  VSCODE_FIFO="/tmp/vibe-vscode-${PROJECT_NAME}.fifo"
-  VSCODE_FIFO_RESP="/tmp/vibe-vscode-${PROJECT_NAME}-resp.fifo"
+  FIFO_ID="$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' ')"
+  VSCODE_FIFO="/tmp/vibe-vscode-${PROJECT_NAME}-${FIFO_ID}.fifo"
+  VSCODE_FIFO_RESP="/tmp/vibe-vscode-${PROJECT_NAME}-${FIFO_ID}-resp.fifo"
   for fifo in "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"; do
-    if [[ ! -p "$fifo" ]]; then
-      mkfifo "$fifo"
-      chmod 666 "$fifo"
-    fi
+    mkfifo "$fifo"
+    chmod 666 "$fifo"
   done
   export VSCODE_FIFO VSCODE_FIFO_RESP
 fi
@@ -337,6 +335,7 @@ UP_ARGS=()
 if ((BUILD)); then
   UP_ARGS+=("--build")
 fi
+compose down &>/dev/null
 compose --file - up "${UP_ARGS[@]}" -d <<< "$DOCKER_COMPOSE"
 
 # Helper to open VS Code attached to the container
@@ -405,8 +404,10 @@ cleanup() {
     kill "$WATCHER_PID" 2>/dev/null || true
   fi
   if ! ((KEEP)); then
-    compose down
-    rm -f "/tmp/vibe-vscode-${PROJECT_NAME}.fifo" "/tmp/vibe-vscode-${PROJECT_NAME}-resp.fifo"
+    (
+      compose down
+      rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"
+    ) &>/dev/null &
   fi
 }
 trap cleanup EXIT
@@ -421,7 +422,12 @@ if ((VSCODE)); then
 fi
 
 # Helper for compose exec with explicit working directory
-EXEC=(compose exec -w "/${PROJECT_NAME}/workspace" claude)
+if [[ -n "${WORKTREE_REL:-}" ]]; then
+  WORKDIR="/${PROJECT_NAME}/workspace/${WORKTREE_REL}"
+else
+  WORKDIR="/${PROJECT_NAME}/workspace"
+fi
+EXEC=(compose exec -w "$WORKDIR" claude)
 
 # Shell into the container if in debug mode
 if ((DEBUG)); then
@@ -452,7 +458,7 @@ if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
 else
   CLAUDE_PROJECT_DIR="/home/dev/.claude/projects/-${PROJECT_NAME}-workspace"
   : "$(
-    compose exec -T -w "/${PROJECT_NAME}/workspace" claude \
+    compose exec -T -w "$WORKDIR" claude \
     bash -c 'ls -t '"${CLAUDE_PROJECT_DIR}"'/*.jsonl 2>/dev/null' \
     | head -1 | xargs -r basename
   )"
