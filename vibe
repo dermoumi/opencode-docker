@@ -6,17 +6,19 @@ set -e
 DEBUG=0
 BUILD=0
 DOWN=0
+KEEP=0
 VSCODE=0
 
 # Parse flags
-while getopts "BdDlv" opt; do
+while getopts "BdDklv" opt; do
   case $opt in
     B) BUILD=1;;
     d) DOWN=1;;
     D) DEBUG=1;;
+    k) KEEP=1;;
     l) LOCAL=1;;
     v) VSCODE=1;;
-    *) echo "Usage: vibe [-B] [-d] [-D] [-l] [-v] [directory] [-- args...]"; exit 1;;
+    *) echo "Usage: vibe [-B] [-d] [-D] [-k] [-l] [-v] [directory] [-- args...]"; exit 1;;
   esac
 done
 shift $((OPTIND - 1))
@@ -388,6 +390,10 @@ fi
 cleanup() {
   if [[ -n "$WATCHER_PID" ]]; then
     kill "$WATCHER_PID" 2>/dev/null || true
+  fi
+  if ! ((KEEP)); then
+    compose down
+    rm -f "/tmp/vibe-vscode-${PROJECT_NAME}.fifo" "/tmp/vibe-vscode-${PROJECT_NAME}-resp.fifo"
   fi
 }
 trap cleanup EXIT
