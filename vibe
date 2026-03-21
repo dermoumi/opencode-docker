@@ -130,21 +130,9 @@ services:
           && useradd -mG wheel -g $$USER -s /bin/bash -u $$UID $$USER \
           && echo "$$USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$$USER
 
-        # Set the working directory
-        ARG PROJECT_NAME
-        RUN mkdir -p /$$PROJECT_NAME/workspace \
-          && chown $$USER:$$USER /$$PROJECT_NAME/workspace
-        WORKDIR /$$PROJECT_NAME/workspace
-
-        # Create entrypoint script
-        ARG ENTRYPOINT
-        RUN echo "$$ENTRYPOINT" > /entrypoint.sh
-        RUN chmod +x /entrypoint.sh
-
-        ENTRYPOINT ["/entrypoint.sh"]
-
         # Switch to the non-root user
         USER $$USER
+        WORKDIR /tmp
 
         # Premake some directories to avoid permission issues
         RUN mkdir -p \
@@ -152,23 +140,35 @@ services:
           /home/$$USER/.local/state/claude \
           /home/$$USER/.claude
 
-        # Create a 'code' wrapper that signals the host to open VS Code
-        ARG CODE_WRAPPER
-        RUN echo "$$CODE_WRAPPER" > /home/$$USER/.local/bin/code
-        RUN chmod +x /home/$$USER/.local/bin/code
-
-        # Install Claude Code
-        RUN curl -fsSL https://claude.ai/install.sh | bash
-
-        # Update the PATH
-        ENV PATH="/home/$$USER/.local/bin:$$PATH"
-
         # Install yay (AUR helper) as the non-root user
         RUN git clone https://aur.archlinux.org/yay.git \
           && cd yay \
           && makepkg -si --noconfirm \
           && cd .. \
           && rm -rf yay
+
+        # Install Claude Code
+        RUN curl -fsSL https://claude.ai/install.sh | bash
+        ENV PATH="/home/$$USER/.local/bin:$$PATH"
+
+        # --- Project-specific layers (cheap, change per project) ---
+
+        # Create a 'code' wrapper that signals the host to open VS Code
+        ARG CODE_WRAPPER
+        RUN echo "$$CODE_WRAPPER" > /home/$$USER/.local/bin/code \
+          && chmod +x /home/$$USER/.local/bin/code
+
+        # Create entrypoint script
+        ARG ENTRYPOINT
+        RUN echo "$$ENTRYPOINT" | sudo tee /entrypoint.sh > /dev/null \
+          && sudo chmod +x /entrypoint.sh
+        ENTRYPOINT ["/entrypoint.sh"]
+
+        # Set the working directory
+        ARG PROJECT_NAME
+        RUN sudo mkdir -p /$$PROJECT_NAME/workspace \
+          && sudo chown $$USER:$$USER /$$PROJECT_NAME/workspace
+        WORKDIR /$$PROJECT_NAME/workspace
 
         # Run the ON_BUILD script if provided (used to pre-install tools)
         ARG ON_BUILD
