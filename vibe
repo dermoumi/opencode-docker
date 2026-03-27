@@ -45,9 +45,9 @@ elif [[ "${1:-}" == w:* ]]; then
   WORKTREE="${WORKTREE_BASE}/${WORKTREE_BRANCH}"
   if [[ ! -d "$WORKTREE" ]]; then
     if git show-ref --verify --quiet "refs/heads/$WORKTREE_BRANCH"; then
-      git worktree add --relative-paths "$WORKTREE" "$WORKTREE_BRANCH"
+      git worktree add "$WORKTREE" "$WORKTREE_BRANCH"
     else
-      git worktree add --relative-paths -b "$WORKTREE_BRANCH" "$WORKTREE"
+      git worktree add -b "$WORKTREE_BRANCH" "$WORKTREE"
     fi
   fi
 
