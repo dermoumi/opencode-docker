@@ -7,6 +7,7 @@ DEBUG=0
 BUILD=0
 DOWN=0
 KEEP=0
+TORN_DOWN=0
 VSCODE=0
 
 # Parse flags
@@ -43,6 +44,15 @@ elif [[ "${1:-}" == w:* ]]; then
   fi
 
   WORKTREE="${WORKTREE_BASE}/${WORKTREE_BRANCH}"
+  if [[ -d "$WORKTREE" ]] && [[ ! -f "$WORKTREE/.git" ]]; then
+    read -rp "Stale directory '$WORKTREE_BRANCH' exists but is not a valid worktree. Remove and re-create? [y/N] " answer
+    if [[ "$answer" == [yY] ]]; then
+      rm -rf "$WORKTREE"
+    else
+      echo "Cannot proceed without a valid worktree." >&2
+      exit 1
+    fi
+  fi
   if [[ ! -d "$WORKTREE" ]]; then
     if git show-ref --verify --quiet "refs/heads/$WORKTREE_BRANCH"; then
       git worktree add "$WORKTREE" "$WORKTREE_BRANCH"
@@ -416,7 +426,7 @@ cleanup() {
   if [[ -n "$WATCHER_PID" ]]; then
     kill "$WATCHER_PID" 2>/dev/null || true
   fi
-  if ! ((KEEP)); then
+  if ! ((KEEP)) && ! ((TORN_DOWN)); then
     (
       compose down
       rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"
@@ -491,11 +501,18 @@ else
   fi
 fi
 
+# Tear down container before worktree removal so the mount is released
+if [[ -n "$WORKTREE" ]] && ! ((KEEP)); then
+  compose down &>/dev/null
+  rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"
+  TORN_DOWN=1
+fi
+
 # Prompt to remove worktree if one was created
 if [[ -n "$WORKTREE" ]]; then
   read -rp "Remove worktree '$WORKTREE_BRANCH'? [y/N] " answer
   if [[ "$answer" == [yY] ]]; then
-    git worktree remove "$WORKTREE"
+    git worktree remove "$WORKTREE" 2>/dev/null || rm -rf "$WORKTREE"
     echo "Worktree '$WORKTREE_BRANCH' removed."
   fi
 fi
