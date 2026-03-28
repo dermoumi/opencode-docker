@@ -136,8 +136,12 @@ services:
             export SSH_AUTH_SOCK=/tmp/ssh_auth_sock
           fi
 
-          # Symlink the GnuPG socket to the correct directory if it exists
+          # Forward host GPG agent socket into the container
           if [[ -S /tmp/gnupg_sock ]]; then
+            # Docker mounts sockets as root — fix permissions for dev user
+            sudo chmod 666 /tmp/gnupg_sock
+            # Kill any auto-started agent so it doesn't replace our symlink
+            gpgconf --kill gpg-agent 2>/dev/null || true
             GNUPG_SOCK=$$(gpgconf --list-dir agent-socket)
             mkdir -m 700 -p "$$(dirname "$$GNUPG_SOCK")"
             ln -sf /tmp/gnupg_sock "$$GNUPG_SOCK"
@@ -145,8 +149,12 @@ services:
 
           # Import host GPG public keys once per container start
           if [[ -n "$${GPG_PUBKEYS:-}" && ! -f /tmp/.gpg_keys_imported ]]; then
-            gpgconf --kill keyboxd 2>/dev/null
-            echo "$$GPG_PUBKEYS" | gpg --import 2>/dev/null ||:
+            gpgconf --kill keyboxd 2>/dev/null || true
+            echo "$$GPG_PUBKEYS" | gpg --batch --no-autostart --import 2>/dev/null || true
+            # Trust imported keys ultimately (they're our own keys)
+            gpg --batch --no-autostart --list-keys --with-colons 2>/dev/null \
+              | awk -F: '/^fpr:/{print $$10":6:"}' \
+              | gpg --batch --no-autostart --import-ownertrust 2>/dev/null || true
             touch /tmp/.gpg_keys_imported
           fi
 
