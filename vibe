@@ -168,6 +168,11 @@ services:
             export EDITOR="code -w"
           fi
 
+          # Set BROWSER to the xdg-open wrapper if browser FIFO is available
+          if [[ -p /tmp/browser_fifo ]]; then
+            export BROWSER="xdg-open"
+          fi
+
           # Auto-trust the workspace directory so Claude doesn't prompt
           node -e "
             var fs = require('fs'), f = process.env.HOME + '/.claude.json';
@@ -200,6 +205,13 @@ services:
           # Only wait for host response if -w/--wait was passed
           if [[ "$$WAIT" -eq 1 ]]; then
             read -r < /tmp/vscode_fifo_resp
+          fi
+        BROWSER_WRAPPER: |
+          #!/bin/bash
+          if [[ -p /tmp/browser_fifo ]]; then
+            for arg in "$$@"; do
+              echo "$$arg" > /tmp/browser_fifo
+            done
           fi
         ON_BUILD: "${ON_BUILD:-}"
       dockerfile_inline: |
@@ -243,6 +255,11 @@ services:
         RUN echo "$$CODE_WRAPPER" > /home/$$USER/.local/bin/code \
           && chmod +x /home/$$USER/.local/bin/code
 
+        # Create a browser wrapper for forwarding URLs to the host
+        ARG BROWSER_WRAPPER
+        RUN echo "$$BROWSER_WRAPPER" > /home/$$USER/.local/bin/xdg-open \
+          && chmod +x /home/$$USER/.local/bin/xdg-open
+
         # Create entrypoint script
         ARG ENTRYPOINT
         RUN echo "$$ENTRYPOINT" | sudo tee /entrypoint.sh > /dev/null \
@@ -276,6 +293,7 @@ services:
       - ${CLAUDE_STATE:-claude_state}:/home/dev/.local/state/claude
       - ${VSCODE_FIFO:-/dev/null}:/tmp/vscode_fifo
       - ${VSCODE_FIFO_RESP:-/dev/null}:/tmp/vscode_fifo_resp
+      - ${BROWSER_FIFO:-/dev/null}:/tmp/browser_fifo
       - ${VIBE_DIR}:${VIBE_MOUNT}
 
 volumes:
@@ -296,8 +314,8 @@ get_container_id() {
 # Tear down the compose file and exit if requested
 if ((DOWN)); then
   compose down
-  # Clean up any VS Code FIFOs for this project
-  rm -f /tmp/vibe-vscode-"${PROJECT_NAME}"-*.fifo
+  # Clean up any FIFOs for this project
+  rm -f /tmp/vibe-vscode-"${PROJECT_NAME}"-*.fifo /tmp/vibe-browser-"${PROJECT_NAME}"-*.fifo
   exit 0
 fi
 
@@ -315,11 +333,13 @@ if [[ -f "$HOME/.gitconfig" ]]; then
   export GITCONFIG="$HOME/.gitconfig"
 fi
 
+# Generate a unique FIFO ID for this session (shared by all FIFO bridges)
+FIFO_ID="$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' ')"
+
 # Setup the VS Code FIFOs if 'code' is available on the host
 HAS_CODE=0
 if command -v code &>/dev/null; then
   HAS_CODE=1
-  FIFO_ID="$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' ')"
   VSCODE_FIFO="/tmp/vibe-vscode-${PROJECT_NAME}-${FIFO_ID}.fifo"
   VSCODE_FIFO_RESP="/tmp/vibe-vscode-${PROJECT_NAME}-${FIFO_ID}-resp.fifo"
   for fifo in "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"; do
@@ -328,6 +348,12 @@ if command -v code &>/dev/null; then
   done
   export VSCODE_FIFO VSCODE_FIFO_RESP
 fi
+
+# Setup the browser FIFO for forwarding URLs to the host browser
+BROWSER_FIFO="/tmp/vibe-browser-${PROJECT_NAME}-${FIFO_ID}.fifo"
+mkfifo "$BROWSER_FIFO"
+chmod 666 "$BROWSER_FIFO"
+export BROWSER_FIFO
 
 # Check if the user has an on_build.sh script in ~/.vibe
 ON_BUILD_SCRIPT="$HOME/.claude-docker/on_build.sh"
@@ -417,6 +443,24 @@ if ((HAS_CODE)); then
   WATCHER_PID=$!
 fi
 
+# Start browser watcher for forwarding URLs to the host browser
+BROWSER_WATCHER_PID=""
+(
+  if command -v open &>/dev/null; then
+    OPEN_CMD="open"
+  elif command -v xdg-open &>/dev/null; then
+    OPEN_CMD="xdg-open"
+  else
+    exit 1
+  fi
+  while true; do
+    if read -r url < "$BROWSER_FIFO"; then
+      $OPEN_CMD "$url" &>/dev/null &
+    fi
+  done
+) &
+BROWSER_WATCHER_PID=$!
+
 # Clean up watcher on exit
 cleanup() {
   if [[ -n "${TMUX:-}" ]]; then
@@ -427,10 +471,13 @@ cleanup() {
   if [[ -n "$WATCHER_PID" ]]; then
     kill "$WATCHER_PID" 2>/dev/null || true
   fi
+  if [[ -n "$BROWSER_WATCHER_PID" ]]; then
+    kill "$BROWSER_WATCHER_PID" 2>/dev/null || true
+  fi
   if ! ((KEEP)) && ! ((TORN_DOWN)); then
     (
       compose down
-      rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"
+      rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP" "$BROWSER_FIFO"
     ) &>/dev/null &
   fi
 }
@@ -505,7 +552,7 @@ fi
 # Tear down container before worktree removal so the mount is released
 if [[ -n "$WORKTREE" ]] && ! ((KEEP)); then
   compose down &>/dev/null
-  rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"
+  rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP" "$BROWSER_FIFO"
   TORN_DOWN=1
 fi
 
