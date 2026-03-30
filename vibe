@@ -531,10 +531,14 @@ Break large plans into small steps — each step should fit in one reviewable co
 TOOL_FLAGS=(--dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT")
 
 # Set terminal/tmux window name
+WINDOW_TITLE="vibe"
+if [[ -n "$WORKTREE_BRANCH" ]]; then
+  WINDOW_TITLE="vibe:${WORKTREE_BRANCH}"
+fi
 if [[ -n "${TMUX:-}" ]]; then
-  tmux rename-window vibe
+  tmux rename-window "$WINDOW_TITLE"
 else
-  printf '\033]0;vibe\007'
+  printf '\033]0;%s\007' "$WINDOW_TITLE"
 fi
 
 echo "Running 'claude' in container..."
