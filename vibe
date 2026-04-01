@@ -358,10 +358,23 @@ if command -v code &>/dev/null; then
   export VSCODE_FIFO VSCODE_FIFO_RESP
 fi
 
+# Detect host browser open command
+if command -v open &>/dev/null; then
+  OPEN_CMD="open"
+elif command -v xdg-open &>/dev/null; then
+  OPEN_CMD="xdg-open"
+else
+  OPEN_CMD=""
+fi
+
 # Setup the browser FIFO for forwarding URLs to the host browser
-BROWSER_FIFO="/tmp/vibe-browser-${PROJECT_NAME}-${FIFO_ID}.fifo"
-mkfifo "$BROWSER_FIFO"
-chmod 666 "$BROWSER_FIFO"
+if [[ -n "$OPEN_CMD" ]]; then
+  BROWSER_FIFO="/tmp/vibe-browser-${PROJECT_NAME}-${FIFO_ID}.fifo"
+  mkfifo "$BROWSER_FIFO"
+  chmod 666 "$BROWSER_FIFO"
+else
+  BROWSER_FIFO=""
+fi
 export BROWSER_FIFO
 
 # Check if the user has an on_build.sh script in ~/.vibe
@@ -454,21 +467,16 @@ fi
 
 # Start browser watcher for forwarding URLs to the host browser
 BROWSER_WATCHER_PID=""
-(
-  if command -v open &>/dev/null; then
-    OPEN_CMD="open"
-  elif command -v xdg-open &>/dev/null; then
-    OPEN_CMD="xdg-open"
-  else
-    exit 1
-  fi
-  while true; do
-    if read -r url < "$BROWSER_FIFO"; then
-      $OPEN_CMD "$url" &>/dev/null &
-    fi
-  done
-) &
-BROWSER_WATCHER_PID=$!
+if [[ -n "$OPEN_CMD" ]]; then
+  (
+    while true; do
+      if read -r url < "$BROWSER_FIFO"; then
+        $OPEN_CMD "$url" &>/dev/null &
+      fi
+    done
+  ) &
+  BROWSER_WATCHER_PID=$!
+fi
 
 # Clean up watcher on exit
 cleanup() {
