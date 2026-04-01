@@ -555,12 +555,12 @@ if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
   "${EXEC[@]}" /entrypoint.sh claude "${TOOL_FLAGS[@]}" "${EXTRA_ARGS[@]}"
 else
   CLAUDE_PROJECT_DIR="/home/dev/.claude/projects/$(echo "$WORKDIR" | tr '/' '-')"
-  : "$(
+  SESSION_FILE="$(
     compose exec -T -w "$WORKDIR" claude \
     bash -c 'ls -t '"${CLAUDE_PROJECT_DIR}"'/*.jsonl 2>/dev/null' \
     | head -1 | xargs -r basename
   )"
-  SESSION_ID="${_%.*}" # Strip .jsonl suffix
+  SESSION_ID="${SESSION_FILE%.*}"
 
   if [[ -n "$SESSION_ID" ]]; then
     echo "Resuming session $SESSION_ID"
