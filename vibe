@@ -210,7 +210,7 @@ services:
               ARGS+=("$$(realpath "$$arg")")
             fi
           done
-          echo "$${ARGS[*]}" > /tmp/vscode_fifo
+          printf '%s\0' "$${ARGS[@]}" > /tmp/vscode_fifo
           # Only wait for host response if -w/--wait was passed
           if [[ "$$WAIT" -eq 1 ]]; then
             read -r < /tmp/vscode_fifo_resp
@@ -407,16 +407,16 @@ if ((HAS_CODE)); then
   (
     echo "Launching code watcher socket"
     while true; do
-      if read -r args < "$VSCODE_FIFO"; then
+      if args_raw=$(cat "$VSCODE_FIFO") && [[ -n "$args_raw" ]]; then
         container_id="$(get_container_id)"
         hex_id="$(printf '%s' "$container_id" | od -A n -t x1 | tr -d ' \n')"
         uri_base="vscode-remote://attached-container+${hex_id}"
 
-        # Separate flags from paths
+        # Separate flags from paths (NUL-delimited protocol)
         flags=()
         paths=()
-        # shellcheck disable=SC2086
-        for arg in $args; do
+        mapfile -d '' all_args < <(printf '%s' "$args_raw")
+        for arg in "${all_args[@]}"; do
           if [[ "$arg" == -* ]]; then
             flags+=("$arg")
           else
