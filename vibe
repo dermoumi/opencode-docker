@@ -353,7 +353,7 @@ if command -v code &>/dev/null; then
   VSCODE_FIFO_RESP="/tmp/vibe-vscode-${PROJECT_NAME}-${FIFO_ID}-resp.fifo"
   for fifo in "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"; do
     mkfifo "$fifo"
-    chmod 666 "$fifo"
+    chmod 600 "$fifo"
   done
   export VSCODE_FIFO VSCODE_FIFO_RESP
 fi
@@ -371,7 +371,7 @@ fi
 if [[ -n "$OPEN_CMD" ]]; then
   BROWSER_FIFO="/tmp/vibe-browser-${PROJECT_NAME}-${FIFO_ID}.fifo"
   mkfifo "$BROWSER_FIFO"
-  chmod 666 "$BROWSER_FIFO"
+  chmod 600 "$BROWSER_FIFO"
 else
   BROWSER_FIFO=""
 fi
