@@ -420,7 +420,6 @@ open_vscode() {
 WATCHER_PID=""
 if ((HAS_CODE)); then
   (
-    echo "Launching code watcher socket"
     while true; do
       if args_raw=$(cat "$VSCODE_FIFO") && [[ -n "$args_raw" ]]; then
         container_id="$(get_container_id)"
