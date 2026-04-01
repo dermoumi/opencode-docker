@@ -96,13 +96,16 @@ if [[ ! -f "$VIBE_DIR/.gitignore" ]]; then
 fi
 export VIBE_DIR
 
+# Sanitize a string to only contain alphanumeric characters and hyphens
+sanitize() { echo "$1" | tr -cd "a-zA-Z0-9-"; }
+
 # Base docker arguments
 DIR_HASH="$(echo -n "$TARGET_DIR" | md5sum | cut -c1-4)"
-DIR_BASENAME="$(basename "$TARGET_DIR" | tr -cd "a-zA-Z0-9-" | tr " " "-" | tr "." "-" | tr "_" "-")"
+DIR_BASENAME="$(sanitize "$(basename "$TARGET_DIR")")"
 
 # For worktrees, include the branch name (DIR_BASENAME is already the repo name)
 if [[ -n "$WORKTREE" ]]; then
-  BRANCH_BASENAME="$(echo "$WORKTREE_BRANCH" | tr -cd "a-zA-Z0-9-" | tr " " "-" | tr "." "-" | tr "_" "-")"
+  BRANCH_BASENAME="$(sanitize "$WORKTREE_BRANCH")"
   PROJECT_NAME="vibe-${DIR_BASENAME}-${BRANCH_BASENAME}-${DIR_HASH}"
 else
   PROJECT_NAME="vibe-${DIR_BASENAME}-${DIR_HASH}"
