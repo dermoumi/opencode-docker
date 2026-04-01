@@ -492,10 +492,8 @@ cleanup() {
     kill "$BROWSER_WATCHER_PID" 2>/dev/null || true
   fi
   if ! ((KEEP)) && ! ((TORN_DOWN)); then
-    (
-      compose down
-      rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP" "$BROWSER_FIFO"
-    ) &>/dev/null &
+    compose down &>/dev/null
+    rm -f "$VSCODE_FIFO" "$VSCODE_FIFO_RESP" "$BROWSER_FIFO"
   fi
 }
 trap cleanup EXIT
