@@ -96,6 +96,19 @@ if [[ ! -f "$VIBE_DIR/.gitignore" ]]; then
 fi
 export VIBE_DIR
 
+# Set terminal/tmux window name early (before slow compose up)
+WINDOW_TITLE="vibe"
+if [[ -n "$WORKTREE_BRANCH" ]]; then
+  WINDOW_TITLE="vibe:${WORKTREE_BRANCH}"
+fi
+TMUX_WINDOW=""
+if [[ -n "${TMUX:-}" ]]; then
+  TMUX_WINDOW="$(tmux display-message -p '#{window_id}')"
+  tmux rename-window -t "$TMUX_WINDOW" "$WINDOW_TITLE"
+else
+  printf '\033]0;%s\007' "$WINDOW_TITLE"
+fi
+
 # Sanitize a string to only contain alphanumeric characters and hyphens
 sanitize() { echo "$1" | tr -cd "a-zA-Z0-9-"; }
 
@@ -484,8 +497,8 @@ fi
 
 # Clean up watcher on exit
 cleanup() {
-  if [[ -n "${TMUX:-}" ]]; then
-    tmux set-option -w automatic-rename on
+  if [[ -n "$TMUX_WINDOW" ]]; then
+    tmux set-option -w -t "$TMUX_WINDOW" automatic-rename on
   else
     printf '\033]0;\007'
   fi
@@ -540,17 +553,6 @@ Break large plans into small steps — each step should fit in one reviewable co
 "
 
 TOOL_FLAGS=(--dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT")
-
-# Set terminal/tmux window name
-WINDOW_TITLE="vibe"
-if [[ -n "$WORKTREE_BRANCH" ]]; then
-  WINDOW_TITLE="vibe:${WORKTREE_BRANCH}"
-fi
-if [[ -n "${TMUX:-}" ]]; then
-  tmux rename-window "$WINDOW_TITLE"
-else
-  printf '\033]0;%s\007' "$WINDOW_TITLE"
-fi
 
 echo "Running 'claude' in container..."
 if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
