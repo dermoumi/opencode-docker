@@ -546,9 +546,10 @@ At session start, run: export PATH=\"\$(cat ~/.bin-paths 2>/dev/null | tr '\\n' 
 
 Check .vibe/ for context files (PLAN.md, PROGRESS.md, etc.) and keep them updated. Max 150 lines each.
 
-Be concise. Prefer simple, clean solutions over hacky or overengineered ones.
-When unsure, ask the user. If the implementation diverges significantly from the plan,
-stop and consult the user before proceeding.
+Be concise. Skip reaffirmations — go straight to the point.
+Challenge the user's decisions if you see a better approach.
+Prefer simple, clean solutions over hacky or overengineered ones.
+In plan mode, ONLY plan. Never edit files until the plan is approved.
 Break large plans into small steps — each step should fit in one reviewable commit. NEVER make more than ~300 lines of changes without stopping to let the user review and commit. Complete one step at a time, then ask before moving to the next.
 "
 
