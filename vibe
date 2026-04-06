@@ -9,18 +9,20 @@ DOWN=0
 KEEP=0
 TORN_DOWN=0
 VSCODE=0
+NO_CACHE=0
 LOCAL_VOLUMES=0
 
 # Parse flags
-while getopts "BdDklv" opt; do
+while getopts "BdDklNv" opt; do
   case $opt in
     B) BUILD=1;;
     d) DOWN=1;;
     D) DEBUG=1;;
     k) KEEP=1;;
     l) LOCAL_VOLUMES=1;;
+    N) NO_CACHE=1; BUILD=1;;
     v) VSCODE=1;;
-    *) echo "Usage: vibe [-B] [-d] [-D] [-k] [-l] [-v] [directory] [-- args...]"; exit 1;;
+    *) echo "Usage: vibe [-B] [-d] [-D] [-k] [-l] [-N] [-v] [directory] [-- args...]"; exit 1;;
   esac
 done
 shift $((OPTIND - 1))
@@ -417,10 +419,14 @@ if ! ((LOCAL_VOLUMES)); then
 fi
 
 UP_ARGS=()
-if ((BUILD)); then
-  UP_ARGS+=("--build")
-fi
 compose down &>/dev/null
+if ((BUILD)); then
+  if ((NO_CACHE)); then
+    compose --file - build --no-cache <<< "$DOCKER_COMPOSE"
+  else
+    UP_ARGS+=("--build")
+  fi
+fi
 compose --file - up "${UP_ARGS[@]}" -d <<< "$DOCKER_COMPOSE"
 
 # Helper to open VS Code attached to the container
