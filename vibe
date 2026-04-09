@@ -345,11 +345,14 @@ get_container_id() {
   docker ps --filter "name=${PROJECT_NAME}-claude-1" -q
 }
 
+# Use XDG_RUNTIME_DIR for FIFOs so they survive /tmp cleanups (systemd-tmpfiles)
+FIFO_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+
 # Tear down the compose file and exit if requested
 if ((DOWN)); then
   compose down
   # Clean up any FIFOs for this project
-  rm -f /tmp/vibe-vscode-"${PROJECT_NAME}"-*.fifo /tmp/vibe-browser-"${PROJECT_NAME}"-*.fifo
+  rm -f "${FIFO_DIR}"/vibe-vscode-"${PROJECT_NAME}"-*.fifo "${FIFO_DIR}"/vibe-browser-"${PROJECT_NAME}"-*.fifo
   exit 0
 fi
 
@@ -376,8 +379,8 @@ FIFO_ID="$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' ')"
 HAS_CODE=0
 if command -v code &>/dev/null; then
   HAS_CODE=1
-  VSCODE_FIFO="/tmp/vibe-vscode-${PROJECT_NAME}-${FIFO_ID}.fifo"
-  VSCODE_FIFO_RESP="/tmp/vibe-vscode-${PROJECT_NAME}-${FIFO_ID}-resp.fifo"
+  VSCODE_FIFO="${FIFO_DIR}/vibe-vscode-${PROJECT_NAME}-${FIFO_ID}.fifo"
+  VSCODE_FIFO_RESP="${FIFO_DIR}/vibe-vscode-${PROJECT_NAME}-${FIFO_ID}-resp.fifo"
   for fifo in "$VSCODE_FIFO" "$VSCODE_FIFO_RESP"; do
     mkfifo "$fifo"
     chmod 600 "$fifo"
@@ -396,7 +399,7 @@ fi
 
 # Setup the browser FIFO for forwarding URLs to the host browser
 if [[ -n "$OPEN_CMD" ]]; then
-  BROWSER_FIFO="/tmp/vibe-browser-${PROJECT_NAME}-${FIFO_ID}.fifo"
+  BROWSER_FIFO="${FIFO_DIR}/vibe-browser-${PROJECT_NAME}-${FIFO_ID}.fifo"
   mkfifo "$BROWSER_FIFO"
   chmod 600 "$BROWSER_FIFO"
 else
@@ -449,8 +452,8 @@ open_vscode() {
 WATCHER_PID=""
 if ((HAS_CODE)); then
   (
-    while true; do
-      if args_raw=$(cat "$VSCODE_FIFO") && [[ -n "$args_raw" ]]; then
+    while [[ -p "$VSCODE_FIFO" ]]; do
+      if args_raw=$(cat "$VSCODE_FIFO" 2>/dev/null) && [[ -n "$args_raw" ]]; then
         container_id="$(get_container_id)"
         hex_id="$(printf '%s' "$container_id" | od -A n -t x1 | tr -d ' \n')"
         uri_base="vscode-remote://attached-container+${hex_id}"
@@ -499,8 +502,8 @@ fi
 BROWSER_WATCHER_PID=""
 if [[ -n "$OPEN_CMD" ]]; then
   (
-    while true; do
-      if read -r url < "$BROWSER_FIFO"; then
+    while [[ -p "$BROWSER_FIFO" ]]; do
+      if read -r url < "$BROWSER_FIFO" 2>/dev/null; then
         $OPEN_CMD "$url" &>/dev/null &
       fi
     done
@@ -557,7 +560,7 @@ You are running inside a disposable Ubuntu Docker container with passwordless su
 After installing a tool, append its directory to ~/.bin-paths.
 At session start, run: export PATH=\"\$(cat ~/.bin-paths 2>/dev/null | tr '\\n' ':'):\$PATH\"
 
-Check .vibe/ for context files (PLAN.md, PROGRESS.md, etc.) and keep them updated. Max 150 lines each.
+Save project-related context and memory in .vibe/ — context files (PLAN.md, PROGRESS.md, etc.) at the .vibe/ root, and auto-memory files (MEMORY.md and per-memory files) under .vibe/memory/. .vibe/ is bind-mounted from the parent repo and persists across all git worktrees of this project. Max 150 lines per file.
 
 Challenge the user's decisions if you see a better approach.
 Prefer simple, clean solutions over hacky or overengineered ones.
